@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { CheckCircle2 } from "lucide-react";
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { categoryName } from "../lib/categories";
 import { formatBytes, hueOf } from "../lib/format";
 import { fileUrl } from "../lib/native";
@@ -53,6 +53,16 @@ export function AppCard({ app, variant, scope, index = 0, fluid = false }: Props
   const size = ICON_SIZE[variant];
   const installed = !!installs[app.id];
 
+  // Banner cards: the screenshots slide by while the mouse is over the card.
+  const [hovering, setHovering] = useState(false);
+  const [shot, setShot] = useState(0);
+  const shots = app.screenshots;
+  useEffect(() => {
+    if (!hovering || shots.length < 2) return;
+    const t = setInterval(() => setShot((i) => (i + 1) % shots.length), 1400);
+    return () => clearInterval(t);
+  }, [hovering, shots.length]);
+
   const icon =
     detail?.key === key ? (
       <IconPlaceholder size={size} />
@@ -82,6 +92,11 @@ export function AppCard({ app, variant, scope, index = 0, fluid = false }: Props
     tabIndex: 0,
     onClick: open,
     onKeyDown: onKey,
+    onMouseEnter: () => {
+      setShot(0);
+      setHovering(true);
+    },
+    onMouseLeave: () => setHovering(false),
     initial: { opacity: 0, y: 14 },
     animate: { opacity: 1, y: 0 },
     transition: { duration: 0.35, delay: Math.min(index, 10) * 0.035, ease: [0.22, 1, 0.36, 1] as const },
@@ -103,11 +118,40 @@ export function AppCard({ app, variant, scope, index = 0, fluid = false }: Props
     return (
       <motion.div {...common} className={`group shrink-0 snap-start outline-none ${fluid ? "w-full" : "w-[300px]"}`}>
         <div className="aspect-video overflow-hidden rounded-2xl bg-surface-2 ring-accent transition-shadow duration-300 group-hover:shadow-xl group-hover:shadow-black/15 group-focus-visible:ring-2">
-          <Shot
-            src={app.screenshots[0]}
-            name={app.name}
-            className="transition-transform duration-500 ease-out group-hover:scale-[1.04]"
-          />
+          <div className="relative h-full w-full overflow-hidden">
+            <div
+              className={`absolute inset-0 transition-[opacity,transform] duration-500 ease-out ${
+                hovering && shots.length ? "scale-105 opacity-0" : "opacity-100"
+              }`}
+            >
+              <Shot src={fileUrl(app.icon) ? app.icon : undefined} name={app.name} className="scale-150 blur-2xl brightness-75" />
+              <div className="absolute inset-0 grid place-items-center">
+                <AppIcon name={app.name} icon={app.icon} size={112} className="shadow-2xl shadow-black/40" />
+              </div>
+            </div>
+            {shots.map((src, i) => (
+                <img
+                  key={src}
+                  src={fileUrl(src)}
+                  alt=""
+                  loading="lazy"
+                  draggable={false}
+                  className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+                    hovering && i === shot ? "opacity-100" : "opacity-0"
+                  }`}
+                />
+              ))}
+            {hovering && shots.length > 1 && (
+              <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5">
+                {shots.map((_, i) => (
+                  <span
+                    key={i}
+                    className={`h-1.5 rounded-full bg-white shadow transition-all duration-300 ${i === shot ? "w-4 opacity-100" : "w-1.5 opacity-50"}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="mt-3 flex items-center gap-3">
           {icon}
