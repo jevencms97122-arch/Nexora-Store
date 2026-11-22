@@ -49,9 +49,16 @@ function channel(onProgress: ProgressFn) {
 export const native = {
   fileInfo: (path: string) => invoke<FileInfo>("file_info", { path }),
   stageImage: (src: string) => invoke<StoredFile>("stage_image", { src }),
-  importPackage: (appId: string, src: string, onProgress: ProgressFn) =>
-    invoke<StoredFile>("import_package", { appId, src, onProgress: channel(onProgress) }),
-  commitImages: (appId: string, paths: string[]) => invoke<string[]>("commit_images", { appId, paths }),
+  pbSave: (
+    baseUrl: string,
+    token: string,
+    recordId: string | null,
+    fields: [string, string][],
+    files: { field: string; path: string }[],
+    onProgress: ProgressFn,
+  ) => invoke<string>("pb_save", { baseUrl, token, recordId, fields, files, onProgress: channel(onProgress) }),
+  downloadPackage: (appId: string, url: string, fileName: string, onProgress: ProgressFn) =>
+    invoke<StoredFile>("download_package", { appId, url, fileName, onProgress: channel(onProgress) }),
   removeFiles: (paths: string[]) => invoke<void>("remove_files", { paths }),
   installPackage: (appId: string, packagePath: string, appName: string, onProgress: ProgressFn) =>
     invoke<InstallResult>("install_package", { appId, packagePath, appName, onProgress: channel(onProgress) }),

@@ -1,15 +1,17 @@
 import type { AppInput, InstallRecord, ProgressFn, StoreApp } from "../lib/types";
 
-/**
- * Where the catalog comes from. The UI only talks to this interface, so moving
- * from the local database to PocketBase means adding a `PocketBaseProvider`
- * and switching to it, without touching the screens.
- */
+/** Where the catalog comes from: the PocketBase server. */
 export interface StoreProvider {
-  readonly id: "local" | "pocketbase" | "demo";
+  readonly id: "pocketbase";
   readonly label: string;
-  /** Whether apps can be added, edited and deleted from this PC. */
+  /** Server address, shown in the settings. */
+  readonly url: string;
+  /** Whether apps can be added, edited and deleted (administrator signed in). */
   readonly canEdit: boolean;
+  /** Restores the saved administrator session if it is still valid. */
+  restore(): Promise<void>;
+  login(email: string, password: string): Promise<void>;
+  logout(): void;
   listApps(): Promise<StoreApp[]>;
   saveApp(input: AppInput, existing: StoreApp | null, onProgress?: ProgressFn): Promise<StoreApp>;
   deleteApp(app: StoreApp): Promise<void>;

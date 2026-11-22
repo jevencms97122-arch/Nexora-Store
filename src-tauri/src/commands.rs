@@ -15,9 +15,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
-type CmdResult<T> = Result<T, String>;
+pub(crate) type CmdResult<T> = Result<T, String>;
 
-const PACKAGE_EXTS: &[&str] = &["exe", "msi", "zip"];
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico"];
 /// Executables that are almost never the one to launch.
 const NOT_LAUNCHERS: &[&str] = &["unins", "crash", "redist", "dxsetup", "dotnet", "helper", "updater", "report"];
@@ -26,13 +25,13 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-fn data_dir(app: &AppHandle) -> CmdResult<PathBuf> {
+pub(crate) fn data_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     let dir = app.path().app_data_dir().map_err(err)?;
     fs::create_dir_all(&dir).map_err(err)?;
     Ok(dir)
 }
 
-fn safe_id(id: &str) -> CmdResult<String> {
+pub(crate) fn safe_id(id: &str) -> CmdResult<String> {
     let ok = !id.is_empty()
         && id.len() <= 64
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
@@ -48,21 +47,21 @@ fn resolve(base: &Path, rel: &str) -> CmdResult<PathBuf> {
     Ok(base.join(rel_path))
 }
 
-fn to_rel(base: &Path, p: &Path) -> String {
+pub(crate) fn to_rel(base: &Path, p: &Path) -> String {
     p.strip_prefix(base).unwrap_or(p).to_string_lossy().replace('\\', "/")
 }
 
-fn ext_of(p: &Path) -> String {
+pub(crate) fn ext_of(p: &Path) -> String {
     p.extension().and_then(OsStr::to_str).unwrap_or("").to_ascii_lowercase()
 }
 
-fn name_of(p: &Path) -> String {
+pub(crate) fn name_of(p: &Path) -> String {
     p.file_name().and_then(OsStr::to_str).unwrap_or("fichier").to_string()
 }
 
 /// Paths saved by the store are relative to the data dir; the path of an app installed by
 /// its own installer (e.g. `C:\Program Files\...\app.exe`) is absolute.
-fn resolve_any(base: &Path, path: &str) -> CmdResult<PathBuf> {
+pub(crate) fn resolve_any(base: &Path, path: &str) -> CmdResult<PathBuf> {
     let p = Path::new(path);
     if p.is_absolute() { Ok(p.to_path_buf()) } else { resolve(base, path) }
 }
@@ -84,8 +83,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + '
 
 #[derive(Clone, Serialize)]
 pub struct Progress {
-    done: u64,
-    total: u64,
+    pub(crate) done: u64,
+    pub(crate) total: u64,
 }
 
 struct Reporter<'a> {
@@ -125,23 +124,6 @@ fn stream(input: &mut impl Read, output: &mut impl Write, rep: &mut Reporter, bu
     }
 }
 
-/// Copies through a `.part` file so a crash never leaves a half-written file behind.
-fn copy_with_progress(src: &Path, dst: &Path, rep: &mut Reporter) -> CmdResult<()> {
-    let part = dst.with_file_name(format!("{}.part", name_of(dst)));
-    let result = (|| {
-        let mut input = File::open(src)?;
-        let mut output = File::create(&part)?;
-        let mut buf = vec![0u8; 1 << 20];
-        stream(&mut input, &mut output, rep, &mut buf)?;
-        drop(output);
-        fs::rename(&part, dst)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&part);
-    }
-    result.map_err(err)
-}
-
 // ---------------------------------------------------------------------------
 // Commands: adding apps to the library
 // ---------------------------------------------------------------------------
@@ -168,9 +150,9 @@ pub fn file_info(path: String) -> CmdResult<FileInfo> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredFile {
-    path: String,
-    name: String,
-    size: u64,
+    pub(crate) path: String,
+    pub(crate) name: String,
+    pub(crate) size: u64,
 }
 
 /// Copies a picked image into `staging/` so the form can preview it before saving.
@@ -190,55 +172,6 @@ pub async fn stage_image(app: AppHandle, src: String) -> CmdResult<StoredFile> {
         Ok(StoredFile { path: to_rel(&base, &dst), name: name_of(&src), size })
     })
     .await
-}
-
-/// Copies an `.exe`, `.msi` or `.zip` into `library/<app_id>/`.
-#[tauri::command]
-pub async fn import_package(
-    app: AppHandle,
-    app_id: String,
-    src: String,
-    on_progress: Channel<Progress>,
-) -> CmdResult<StoredFile> {
-    let id = safe_id(&app_id)?;
-    let base = data_dir(&app)?;
-    blocking(move || {
-        let src = PathBuf::from(src);
-        let ext = ext_of(&src);
-        if !PACKAGE_EXTS.contains(&ext.as_str()) {
-            return Err("Formats acceptés : .exe, .msi ou .zip".into());
-        }
-        let size = fs::metadata(&src).map_err(|_| "Fichier introuvable".to_string())?.len();
-        let dir = base.join("library").join(&id);
-        fs::create_dir_all(&dir).map_err(err)?;
-        let dst = dir.join(format!("package-{}.{ext}", unique_stem()));
-        let mut rep = Reporter::new(&on_progress, size);
-        copy_with_progress(&src, &dst, &mut rep)?;
-        rep.finish();
-        Ok(StoredFile { path: to_rel(&base, &dst), name: name_of(&src), size })
-    })
-    .await
-}
-
-/// Moves staged images into `library/<app_id>/`. Paths already in the library are kept.
-#[tauri::command]
-pub fn commit_images(app: AppHandle, app_id: String, paths: Vec<String>) -> CmdResult<Vec<String>> {
-    let id = safe_id(&app_id)?;
-    let base = data_dir(&app)?;
-    let dir = base.join("library").join(&id);
-    fs::create_dir_all(&dir).map_err(err)?;
-    paths
-        .into_iter()
-        .map(|rel| {
-            if !rel.starts_with("staging/") {
-                return Ok(rel);
-            }
-            let src = resolve(&base, &rel)?;
-            let dst = dir.join(format!("img-{}.{}", unique_stem(), ext_of(&src)));
-            fs::rename(&src, &dst).or_else(|_| fs::copy(&src, &dst).map(|_| ())).map_err(err)?;
-            Ok(to_rel(&base, &dst))
-        })
-        .collect()
 }
 
 /// Deletes files the store no longer references (replaced icons, old packages…).

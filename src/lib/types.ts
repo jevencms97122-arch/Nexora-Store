@@ -1,7 +1,7 @@
 export type AppKind = "game" | "app";
 export type PackageType = "exe" | "msi" | "zip";
 
-/** An app or game published in the store (mirrors the future PocketBase `apps` collection). */
+/** An app or game published in the store (mirrors the PocketBase `apps` collection). */
 export interface StoreApp {
   id: string;
   name: string;

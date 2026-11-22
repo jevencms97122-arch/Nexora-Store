@@ -1,5 +1,5 @@
-import { Check, Cloud, FolderOpen, HardDrive, Monitor, Moon, Sun } from "lucide-react";
-import type { ReactNode } from "react";
+import { Check, Cloud, FolderOpen, Monitor, Moon, Sun } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Modal } from "../components/Modal";
 import { Button, Segmented } from "../components/ui";
 import { inTauri, native } from "../lib/native";
@@ -8,6 +8,68 @@ import { useStore } from "../state/store";
 import type { ThemeChoice } from "../state/theme";
 import { useToast } from "../state/toast";
 import { useUpdater } from "../state/updater";
+
+function AdminLogin() {
+  const { provider, login, logout } = useStore();
+  const toast = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (provider.canEdit) {
+    return (
+      <div className="flex items-center justify-between gap-4 rounded-2xl bg-surface-2 px-4 py-3">
+        <div className="text-sm">
+          <span className="font-medium">Administrateur connecté.</span>{" "}
+          <span className="text-muted">Tu peux ajouter, modifier et supprimer des apps.</span>
+        </div>
+        <Button variant="secondary" size="sm" className="bg-surface" onClick={logout}>
+          Se déconnecter
+        </Button>
+      </div>
+    );
+  }
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await login(email.trim(), password);
+      setPassword("");
+      toast("Connecté en administrateur", "success");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2.5 rounded-2xl bg-surface-2 p-4">
+      <div className="text-sm font-medium">Connexion administrateur</div>
+      <div className="text-xs text-muted">Nécessaire pour publier des apps. Les autres personnes peuvent seulement les installer.</div>
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        type="email"
+        autoComplete="username"
+        placeholder="E-mail"
+        className="input"
+      />
+      <input
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        type="password"
+        autoComplete="current-password"
+        placeholder="Mot de passe"
+        className="input"
+      />
+      <Button type="submit" size="sm" disabled={busy || !email || !password} className="self-end">
+        Se connecter
+      </Button>
+    </form>
+  );
+}
 
 function SourceCard({
   icon,
@@ -68,20 +130,15 @@ export function SettingsModal({ theme, setTheme }: { theme: ThemeChoice; setThem
         </section>
 
         <section>
-          <h3 className="mb-2.5 text-[13px] font-medium text-muted">Source du catalogue</h3>
-          <div className="flex flex-col gap-2">
-            <SourceCard
-              icon={<HardDrive className="size-5" />}
-              title={provider.label}
-              text={inTauri ? "Les apps sont stockées et gérées sur ce PC." : "Données d'exemple, rien n'est enregistré."}
-              active
-            />
+          <h3 className="mb-2.5 text-[13px] font-medium text-muted">Serveur du catalogue</h3>
+          <div className="flex flex-col gap-3">
             <SourceCard
               icon={<Cloud className="size-5" />}
-              title="Serveur PocketBase"
-              text="Un catalogue partagé, publié depuis ton serveur."
-              badge="Bientôt"
+              title={provider.label}
+              text={provider.url}
+              active
             />
+            <AdminLogin />
           </div>
         </section>
 

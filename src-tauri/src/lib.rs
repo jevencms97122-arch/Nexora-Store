@@ -1,4 +1,5 @@
 mod commands;
+mod pocketbase;
 
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -34,6 +35,8 @@ CREATE TABLE IF NOT EXISTS installs (
 
 const SCHEMA_V2: &str = "ALTER TABLE apps ADD COLUMN self_update INTEGER NOT NULL DEFAULT 0;";
 
+const SCHEMA_V3: &str = "DROP TABLE IF EXISTS apps;";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![
@@ -47,6 +50,12 @@ pub fn run() {
             version: 2,
             description: "add_self_update",
             sql: SCHEMA_V2,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "catalog_moved_to_pocketbase",
+            sql: SCHEMA_V3,
             kind: MigrationKind::Up,
         },
     ];
@@ -71,8 +80,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::file_info,
             commands::stage_image,
-            commands::import_package,
-            commands::commit_images,
+            pocketbase::pb_save,
+            pocketbase::download_package,
             commands::remove_files,
             commands::install_package,
             commands::detect_installed,

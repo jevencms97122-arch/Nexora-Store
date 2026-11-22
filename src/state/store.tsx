@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { inTauri } from "../lib/native";
 import type { AppInput, InstallRecord, ProgressFn, StoreApp } from "../lib/types";
-import { DemoInstallService, DemoProvider } from "../providers/DemoProvider";
-import { LocalInstallService, LocalProvider } from "../providers/LocalProvider";
+import { BrowserInstallService, LocalInstallService } from "../providers/InstallService";
+import { PocketBaseProvider } from "../providers/PocketBaseProvider";
 import type { InstallService, StoreProvider } from "../providers/StoreProvider";
 import { useToast } from "./toast";
 
@@ -16,6 +16,9 @@ interface StoreValue {
   progress: Record<string, number>;
   saveApp(input: AppInput, existing: StoreApp | null, onProgress?: ProgressFn): Promise<StoreApp>;
   deleteApp(app: StoreApp): Promise<void>;
+  /** Administrator session (needed to add, edit and delete apps). */
+  login(email: string, password: string): Promise<void>;
+  logout(): void;
   install(app: StoreApp): Promise<void>;
   launch(app: StoreApp): Promise<void>;
   uninstall(app: StoreApp): Promise<void>;
@@ -29,9 +32,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export function StoreProviderRoot({ children }: { children: ReactNode }) {
   const toast = useToast();
   const services = useRef<{ provider: StoreProvider; installer: InstallService }>(
-    inTauri
-      ? { provider: new LocalProvider(), installer: new LocalInstallService() }
-      : { provider: new DemoProvider(), installer: new DemoInstallService() },
+    { provider: new PocketBaseProvider(), installer: inTauri ? new LocalInstallService() : new BrowserInstallService() },
   ).current;
 
   const [ready, setReady] = useState(false);
@@ -39,6 +40,8 @@ export function StoreProviderRoot({ children }: { children: ReactNode }) {
   const [apps, setApps] = useState<StoreApp[]>([]);
   const [installs, setInstalls] = useState<Record<string, InstallRecord>>({});
   const [progress, setProgress] = useState<Record<string, number>>({});
+  // Bumped when the administrator signs in or out so `provider.canEdit` is re-read.
+  const [session, setSession] = useState(0);
 
   const refresh = useCallback(async () => {
     const [list, records] = await Promise.all([services.provider.listApps(), services.installer.list()]);
@@ -59,7 +62,24 @@ export function StoreProviderRoot({ children }: { children: ReactNode }) {
     [services],
   );
 
+  const login = useCallback(
+    async (email: string, password: string) => {
+      await services.provider.login(email, password);
+      setSession((n) => n + 1);
+    },
+    [services],
+  );
+
+  const logout = useCallback(() => {
+    services.provider.logout();
+    setSession((n) => n + 1);
+  }, [services]);
+
   useEffect(() => {
+    services.provider
+      .restore()
+      .catch(() => {})
+      .then(() => setSession((n) => n + 1));
     refresh()
       .then(({ list, records }) => void detect(list, records).catch(() => {}))
       .catch((e) => setError(message(e)))
@@ -156,12 +176,14 @@ export function StoreProviderRoot({ children }: { children: ReactNode }) {
       progress,
       saveApp,
       deleteApp,
+      login,
+      logout,
       install,
       launch,
       uninstall,
       reveal,
     }),
-    [ready, error, services, apps, installs, progress, saveApp, deleteApp, install, launch, uninstall, reveal],
+    [ready, error, services, apps, installs, progress, saveApp, deleteApp, login, logout, session, install, launch, uninstall, reveal],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
