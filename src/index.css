@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f6f6f9;
+  --surface: #ffffff;
+  --surface-2: #eeeef3;
+  --line: #e3e3ea;
+  --text: #15151c;
+  --muted: #6c6c7c;
+  --accent: #5a4bf2;
+  --accent-hover: #4b3ce0;
+  --accent-fg: #ffffff;
+  --accent-soft: #ebe9ff;
+}
+
+.dark {
+  --bg: #0f0f14;
+  --surface: #18181f;
+  --surface-2: #22222b;
+  --line: #2b2b36;
+  --text: #f1f1f6;
+  --muted: #9898aa;
+  --accent: #8d82ff;
+  --accent-hover: #a198ff;
+  --accent-fg: #0f0f14;
+  --accent-soft: #262443;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+.selectable {
+  user-select: text;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .input {
+    @apply h-11 w-full rounded-xl border border-line bg-surface px-3.5 text-sm outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted focus:border-accent focus:ring-4 focus:ring-accent/15;
+  }
+  textarea.input {
+    height: auto;
+  }
+}
+
+/* Thin, discreet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 35%, transparent) transparent;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}
