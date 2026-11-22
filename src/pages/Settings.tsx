@@ -1,11 +1,11 @@
-import { Check, Cloud, FolderOpen, Monitor, Moon, Sun } from "lucide-react";
+import { Check, Cloud, FolderOpen, Monitor, Moon, Palette, Sun } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Modal } from "../components/Modal";
 import { Button, Segmented } from "../components/ui";
 import { inTauri, native } from "../lib/native";
 import { useNav } from "../state/nav";
 import { useStore } from "../state/store";
-import type { ThemeChoice } from "../state/theme";
+import { ACCENT_PRESETS, DEFAULT_ACCENT, useAccent, type ThemeChoice } from "../state/theme";
 import { useToast } from "../state/toast";
 import { useUpdater } from "../state/updater";
 
@@ -110,6 +110,7 @@ export function SettingsModal({ theme, setTheme }: { theme: ThemeChoice; setThem
   const { provider, apps, installs } = useStore();
   const toast = useToast();
   const updater = useUpdater();
+  const [accent, setAccent] = useAccent();
   const installedCount = Object.keys(installs).length;
 
   return (
@@ -127,6 +128,46 @@ export function SettingsModal({ theme, setTheme }: { theme: ThemeChoice; setThem
               { value: "dark", label: "Sombre", icon: <Moon className="size-4" /> },
             ]}
           />
+        </section>
+
+        <section>
+          <h3 className="mb-2.5 text-[13px] font-medium text-muted">Couleur principale</h3>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {ACCENT_PRESETS.map((c) => (
+              <button
+                key={c.hex}
+                type="button"
+                title={c.name}
+                aria-label={c.name}
+                aria-pressed={accent === c.hex}
+                onClick={() => setAccent(c.hex)}
+                className={`grid size-9 place-items-center rounded-full ring-offset-2 ring-offset-surface transition-shadow ${
+                  accent === c.hex ? "ring-2 ring-fg" : "hover:ring-2 hover:ring-line"
+                }`}
+                style={{ background: c.hex }}
+              >
+                {accent === c.hex && <Check className="size-4 text-white" />}
+              </button>
+            ))}
+            <label
+              title="Couleur personnalisée"
+              className="relative grid size-9 cursor-pointer place-items-center overflow-hidden rounded-full border border-dashed border-line text-muted hover:text-fg"
+            >
+              <Palette className="size-4" />
+              <input
+                type="color"
+                value={accent}
+                onChange={(e) => setAccent(e.target.value)}
+                aria-label="Couleur personnalisée"
+                className="absolute inset-0 cursor-pointer opacity-0"
+              />
+            </label>
+            {accent !== DEFAULT_ACCENT && (
+              <Button variant="secondary" size="sm" className="ml-1" onClick={() => setAccent(DEFAULT_ACCENT)}>
+                Réinitialiser
+              </Button>
+            )}
+          </div>
         </section>
 
         <section>

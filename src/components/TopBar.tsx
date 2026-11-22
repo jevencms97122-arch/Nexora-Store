@@ -16,11 +16,11 @@ const TABS: { id: Tab; label: string }[] = [
 export function Logo() {
   return (
     <div className="flex items-center gap-2.5" data-tauri-drag-region>
-      <div className="grid size-8 place-items-center rounded-[10px] bg-gradient-to-br from-accent to-fuchsia-500 shadow-md shadow-accent/30">
-        <svg viewBox="0 0 24 24" className="size-4.5 text-white" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 18V6l12 12V6" />
-        </svg>
-      </div>
+      <svg viewBox="0 0 160 160" className="size-8 shrink-0" aria-hidden="true">
+        <rect width="160" height="160" rx="36" fill="#4263EB" />
+        <polygon points="80,26 126,53 126,107 80,134 34,107 34,53" fill="#fff" stroke="#fff" strokeWidth="6" strokeLinejoin="round" />
+        <path d="M80 50V104M58 82L80 106L102 82" fill="none" stroke="#4263EB" strokeWidth="11" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
       <span className="font-display text-[17px] font-semibold tracking-tight" data-tauri-drag-region>
         Nexora
       </span>
@@ -134,7 +134,7 @@ export function TopBar() {
         </label>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 self-stretch">
         {(updater.status === "available" || updater.status === "downloading") && (
           <Button size="sm" variant="secondary" onClick={() => setSettingsOpen(true)} className="h-9 px-4 text-accent">
             <RefreshCw className="size-4" /> Mise à jour disponible

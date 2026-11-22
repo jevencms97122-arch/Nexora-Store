@@ -1,4 +1,5 @@
 import { POCKETBASE_URL } from "../lib/config";
+import { normalizeCategory } from "../lib/categories";
 import { inTauri, native } from "../lib/native";
 import type { AppInput, PackageType, ProgressFn, StoreApp } from "../lib/types";
 import type { StoreProvider } from "./StoreProvider";
@@ -19,8 +20,6 @@ interface PbRecord {
   icon: string;
   screenshots: string[];
   package: string;
-  packageName: string;
-  packageSize: number;
   created: string;
   updated: string;
 }
@@ -41,6 +40,24 @@ const writeToken = (t: string) => {
     /* storage unavailable: the session just won't persist */
   }
 };
+
+/** PocketBase appends `_xxxxxxxxxx` to uploaded file names; show the original name. */
+const originalName = (stored: string) => stored.replace(/_[a-z0-9]{10}(\.[^.]+)?$/i, "$1");
+
+/** Size of a file on the server, without downloading it. */
+async function remoteSize(url: string): Promise<number> {
+  if (!url) return 0;
+  try {
+    const head = await fetch(url, { method: "HEAD" });
+    const len = Number(head.headers.get("content-length"));
+    if (head.ok && len > 0) return len;
+    const part = await fetch(url, { headers: { Range: "bytes=0-0" } });
+    const total = Number(part.headers.get("content-range")?.split("/")[1]);
+    return total > 0 ? total : 0;
+  } catch {
+    return 0;
+  }
+}
 
 const isUrl = (s: string) => /^https?:/.test(s);
 const fileOf = (url: string) => decodeURIComponent(url.split("?")[0].split("/").pop() ?? "");
@@ -118,19 +135,19 @@ export class PocketBaseProvider implements StoreProvider {
     return file ? `${POCKETBASE_URL}/api/files/${COLLECTION}/${r.id}/${encodeURIComponent(file)}` : "";
   }
 
-  private toApp(r: PbRecord): StoreApp {
+  private toApp(r: PbRecord, packageSize = 0): StoreApp {
     return {
       id: r.id,
       name: r.name,
       developer: r.developer ?? "",
       description: r.description ?? "",
       kind: r.kind === "app" ? "app" : "game",
-      category: r.category ?? "",
+      category: normalizeCategory(r.category),
       version: r.version || "1.0",
       packagePath: this.fileUrl(r, r.package),
-      packageName: r.packageName || r.package,
-      packageSize: r.packageSize ?? 0,
-      packageType: packageTypeOf(r.packageName || r.package),
+      packageName: originalName(r.package),
+      packageSize,
+      packageType: packageTypeOf(r.package),
       icon: this.fileUrl(r, r.icon),
       screenshots: (r.screenshots ?? []).map((f) => this.fileUrl(r, f)),
       featured: !!r.featured,
@@ -146,7 +163,8 @@ export class PocketBaseProvider implements StoreProvider {
       const res = await request<{ items: PbRecord[]; totalPages: number }>(
         `/api/collections/${COLLECTION}/records?perPage=200&page=${page}&sort=-created`,
       );
-      out.push(...res.items.map((r) => this.toApp(r)));
+      const sizes = await Promise.all(res.items.map((r) => remoteSize(this.fileUrl(r, r.package))));
+      out.push(...res.items.map((r, i) => this.toApp(r, sizes[i])));
       if (page >= res.totalPages) return out;
     }
   }
@@ -169,8 +187,6 @@ export class PocketBaseProvider implements StoreProvider {
     const files: { field: string; path: string }[] = [];
 
     if (input.packageSource) {
-      const info = await native.fileInfo(input.packageSource);
-      fields.push(["packageName", info.name], ["packageSize", String(info.size)]);
       files.push({ field: "package", path: input.packageSource });
     }
 
@@ -184,7 +200,8 @@ export class PocketBaseProvider implements StoreProvider {
     for (const s of existing?.screenshots ?? []) if (!kept.has(fileOf(s))) fields.push(["screenshots-", fileOf(s)]);
 
     const record = await native.pbSave(POCKETBASE_URL, this.token, existing?.id ?? null, fields, files, onProgress);
-    return this.toApp(JSON.parse(record) as PbRecord);
+    const saved = JSON.parse(record) as PbRecord;
+    return this.toApp(saved, await remoteSize(this.fileUrl(saved, saved.package)));
   }
 
   async deleteApp(app: StoreApp) {

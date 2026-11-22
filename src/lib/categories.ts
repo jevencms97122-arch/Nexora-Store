@@ -29,6 +29,33 @@ export const CATEGORIES: Category[] = [
 
 export const categoriesOf = (kind: AppKind) => CATEGORIES.filter((c) => c.kind === kind);
 
-export const categoryName = (id: string) => CATEGORIES.find((c) => c.id === id)?.name ?? "Sans catégorie";
+const plain = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+
+/**
+ * Categories are free text on the server. A known category (by id or by name, ignoring case and
+ * accents) maps to its id; anything else is kept as typed, so "Launcher" becomes its own category.
+ */
+export function normalizeCategory(raw: string): string {
+  const text = (raw ?? "").trim();
+  if (!text) return "";
+  const key = plain(text);
+  const known = CATEGORIES.find((c) => c.id === key || plain(c.name) === key);
+  return known ? known.id : text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+export const categoryName = (id: string) => (id ? (CATEGORIES.find((c) => c.id === id)?.name ?? id) : "Sans catégorie");
+
+/** Categories to show as filters: the known ones in order, then the custom ones. */
+export function categoriesIn(apps: { category: string }[]): { id: string; name: string }[] {
+  const used = new Set(apps.map((a) => a.category).filter(Boolean));
+  const known = CATEGORIES.filter((c) => used.has(c.id));
+  const custom = [...used].filter((id) => !CATEGORIES.some((c) => c.id === id)).sort((a, b) => a.localeCompare(b));
+  return [...known, ...custom.map((id) => ({ id, name: id }))];
+}
 
 export const KIND_LABEL: Record<AppKind, string> = { game: "Jeu", app: "Application" };

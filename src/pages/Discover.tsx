@@ -6,7 +6,7 @@ import { EmptyState } from "../components/EmptyState";
 import { Hero } from "../components/Hero";
 import { Row } from "../components/Row";
 import { Button } from "../components/ui";
-import { CATEGORIES } from "../lib/categories";
+import { categoriesIn } from "../lib/categories";
 import { useNav } from "../state/nav";
 import { useStore } from "../state/store";
 
@@ -16,7 +16,7 @@ export function Discover() {
   const [category, setCategory] = useState("all");
 
   const list = apps;
-  const categories = useMemo(() => CATEGORIES.filter((c) => list.some((a) => a.category === c.id)), [list]);
+  const categories = useMemo(() => categoriesIn(list), [list]);
   const featured = useMemo(() => {
     const picked = list.filter((a) => a.featured);
     return (picked.length ? picked : list).slice(0, 6);
@@ -42,7 +42,6 @@ export function Discover() {
   }
 
   const selected = categories.find((c) => c.id === category);
-  const selectedIsGame = true;
   const chips = [{ id: "all", name: "Tout" }, ...categories];
 
   return (
@@ -108,13 +107,13 @@ export function Discover() {
             <h2 className="mb-5 font-display text-2xl font-semibold tracking-tight">{selected.name}</h2>
             <div
               className={`grid gap-x-5 gap-y-7 ${
-                selectedIsGame ? "grid-cols-[repeat(auto-fill,minmax(260px,1fr))]" : "grid-cols-[repeat(auto-fill,minmax(132px,1fr))]"
+                "grid-cols-[repeat(auto-fill,minmax(260px,1fr))]"
               }`}
             >
               {list
                 .filter((a) => a.category === selected.id)
                 .map((a, i) => (
-                  <AppCard key={a.id} app={a} variant={variantOf(a)} scope={`grid-${selected.id}`} index={i} fluid={selectedIsGame} />
+                  <AppCard key={a.id} app={a} variant={variantOf(a)} scope={`grid-${selected.id}`} index={i} fluid />
                 ))}
             </div>
           </motion.div>
