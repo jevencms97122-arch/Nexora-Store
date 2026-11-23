@@ -20,7 +20,8 @@ export interface StoreProvider {
 /** Installs on this PC. Always local, whatever the catalog source is. */
 export interface InstallService {
   list(): Promise<InstallRecord[]>;
-  install(app: StoreApp, onProgress: ProgressFn): Promise<InstallRecord>;
+  /** With `unattended`, updates without the installer's wizard when it allows it. */
+  install(app: StoreApp, onProgress: ProgressFn, unattended?: boolean): Promise<InstallRecord>;
   launch(record: InstallRecord): Promise<void>;
   /** Throws when the user cancels the uninstaller (the app then stays installed). */
   uninstall(app: StoreApp, record: InstallRecord): Promise<void>;

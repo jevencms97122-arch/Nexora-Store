@@ -73,7 +73,7 @@ fn unique_stem() -> String {
     format!("{ms}{}", COUNTER.fetch_add(1, Ordering::Relaxed) % 1000)
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
 }
 
@@ -203,50 +203,101 @@ pub struct InstallResult {
 /// installer: it is run (the wizard appears), and once it is closed we look for the app it
 /// installed so that "Ouvrir" starts the app itself and never the installer again.
 /// `launch_path` is empty when the installed app could not be detected.
+/// `update_of` (the current launch path) makes it an unattended update: no wizard when the
+/// installer supports it, and the current version stays in place if anything fails.
 #[tauri::command]
 pub async fn install_package(
     app: AppHandle,
     app_id: String,
     package_path: String,
     app_name: String,
+    update_of: Option<String>,
     on_progress: Channel<Progress>,
 ) -> CmdResult<InstallResult> {
     let id = safe_id(&app_id)?;
     let base = data_dir(&app)?;
     let src = resolve(&base, &package_path)?;
+    let update_of = update_of.filter(|p| !p.is_empty()).map(|p| resolve_any(&base, &p)).transpose()?;
     blocking(move || {
         if !src.is_file() {
             return Err("Le fichier de l'application est introuvable dans la bibliothèque".into());
         }
         let target = base.join("installed").join(&id);
-        if target.exists() {
-            fs::remove_dir_all(&target).map_err(|e| format!("Impossible de remplacer l'installation (l'app est-elle ouverte ?) : {e}"))?;
-        }
 
         if ext_of(&src) != "zip" {
-            return install_with_installer(&src, &app_name, &on_progress);
+            if target.exists() {
+                fs::remove_dir_all(&target).map_err(|e| format!("Impossible de remplacer l'installation (l'app est-elle ouverte ?) : {e}"))?;
+            }
+            return install_with_installer(&src, &app_name, update_of.as_deref(), &on_progress);
         }
 
-        fs::create_dir_all(&target).map_err(err)?;
-        match extract_zip(&src, &target, &on_progress) {
-            Ok(()) => {
-                let launch = find_launcher(&target, &app_name).unwrap_or_else(|| target.clone());
-                Ok(InstallResult { dir: to_rel(&base, &target), launch_path: to_rel(&base, &launch) })
-            }
-            Err(e) => {
-                let _ = fs::remove_dir_all(&target);
-                Err(e)
+        // Extracted aside and swapped at the end: a failure leaves the current version intact.
+        let staging = base.join("installed").join(format!("{id}.new"));
+        let old = base.join("installed").join(format!("{id}.old"));
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(&old);
+        fs::create_dir_all(&staging).map_err(err)?;
+        if let Err(e) = extract_zip(&src, &staging, &on_progress) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e);
+        }
+        if target.exists() {
+            if let Err(e) = fs::rename(&target, &old) {
+                let _ = fs::remove_dir_all(&staging);
+                return Err(format!("Impossible de remplacer l'installation (l'app est-elle ouverte ?) : {e}"));
             }
         }
+        if let Err(e) = fs::rename(&staging, &target) {
+            let _ = fs::rename(&old, &target);
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("Impossible de remplacer l'installation : {e}"));
+        }
+        let _ = fs::remove_dir_all(&old);
+        let launch = find_launcher(&target, &app_name).unwrap_or_else(|| target.clone());
+        Ok(InstallResult { dir: to_rel(&base, &target), launch_path: to_rel(&base, &launch) })
     })
     .await
 }
 
-fn install_with_installer(src: &Path, app_name: &str, channel: &Channel<Progress>) -> CmdResult<InstallResult> {
+/// Command-line switches for an unattended install, from the installer's own signature.
+fn silent_flags(src: &Path) -> Option<&'static str> {
+    let mut head = Vec::new();
+    File::open(src).ok()?.take(8 << 20).read_to_end(&mut head).ok()?;
+    let has = |needle: &[u8]| head.windows(needle.len()).any(|w| w == needle);
+    if has(b"NullsoftInst") || has(b"Nullsoft.NSIS") {
+        Some("/S")
+    } else if has(b"Inno Setup") {
+        Some("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART")
+    } else {
+        None
+    }
+}
+
+/// Runs an installer without its wizard when possible. An unknown installer shows its own.
+fn run_silently(src: &Path) -> CmdResult<()> {
+    let code = if ext_of(src) == "msi" {
+        let params = format!("/i \"{}\" /passive /norestart", src.display());
+        run_and_wait_args(Path::new("msiexec.exe"), Some(&params))?
+    } else {
+        run_and_wait_args(src, silent_flags(src))?
+    };
+    // 1641 and 3010: installed, Windows asks for a restart.
+    if matches!(code, 0 | 1641 | 3010) { Ok(()) } else { Err(format!("L'installateur a échoué (code {code})")) }
+}
+
+fn install_with_installer(src: &Path, app_name: &str, update_of: Option<&Path>, channel: &Channel<Progress>) -> CmdResult<InstallResult> {
     let before = Snapshot::take();
     // total = 0 tells the UI the duration is unknown ("Installation…").
     let _ = channel.send(Progress { done: 0, total: 0 });
-    run_and_wait(src)?;
+    if update_of.is_some() {
+        run_silently(src)?;
+    } else {
+        run_and_wait(src)?;
+    }
+    // An update usually keeps the same executable: no need to search for it.
+    if let Some(current) = update_of.filter(|p| p.is_file()) {
+        return Ok(InstallResult { dir: String::new(), launch_path: current.to_string_lossy().into_owned() });
+    }
 
     // Installers register themselves a moment after closing, and bootstrappers hand over to a
     // background process: keep looking for a while, with every signal we have.
@@ -294,11 +345,11 @@ struct UninstallEntry {
     uninstall: String,
 }
 
-fn env_path(var: &str) -> Option<PathBuf> {
+pub(crate) fn env_path(var: &str) -> Option<PathBuf> {
     std::env::var_os(var).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-fn collect_lnks(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+pub(crate) fn collect_lnks(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     if depth > 3 {
         return;
     }
@@ -377,10 +428,12 @@ fn resolve_shortcuts(_: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
     Vec::new()
 }
 
-/// An executable worth launching: it exists, isn't an uninstaller/helper, isn't part of Windows.
+/// An executable worth launching: it exists, isn't an uninstaller/helper, isn't part of Windows,
+/// and isn't the store itself (the target of the shortcuts it redirects).
 fn is_app_exe(p: &Path) -> bool {
     let in_windows = env_path("windir").is_some_and(|w| p.starts_with(w));
-    ext_of(p) == "exe" && p.is_file() && !in_windows && is_launcher_name(&name_of(p))
+    let is_store = std::env::current_exe().is_ok_and(|s| same_path(&s, p));
+    ext_of(p) == "exe" && p.is_file() && !in_windows && !is_store && is_launcher_name(&name_of(p))
 }
 
 /// Whether a path (its file or one of its three parent folders) looks like it belongs to the app.
@@ -558,14 +611,15 @@ fn launcher_from(entries: &[UninstallEntry], app_name: &str) -> Option<PathBuf> 
 
 /// Runs a file through the shell (so UAC prompts work) and waits until its process ends.
 fn run_and_wait(p: &Path) -> CmdResult<()> {
-    run_and_wait_args(p, None)
+    run_and_wait_args(p, None).map(|_| ())
 }
 
+/// Returns the exit code of the process.
 #[cfg(windows)]
-fn run_and_wait_args(p: &Path, params: Option<&str>) -> CmdResult<()> {
+fn run_and_wait_args(p: &Path, params: Option<&str>) -> CmdResult<u32> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
     use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -590,18 +644,20 @@ fn run_and_wait_args(p: &Path, params: Option<&str>) -> CmdResult<()> {
     if unsafe { ShellExecuteExW(&mut info) } == 0 {
         return Err("Impossible de lancer l'installateur (autorisation refusée ?)".into());
     }
+    let mut code = 0u32;
     if !info.hProcess.is_null() {
         unsafe {
             WaitForSingleObject(info.hProcess, INFINITE);
+            GetExitCodeProcess(info.hProcess, &mut code);
             CloseHandle(info.hProcess);
         }
     }
-    Ok(())
+    Ok(code)
 }
 
 #[cfg(not(windows))]
-fn run_and_wait_args(p: &Path, _params: Option<&str>) -> CmdResult<()> {
-    tauri_plugin_opener::open_path(p, None::<&str>).map_err(err)
+fn run_and_wait_args(p: &Path, _params: Option<&str>) -> CmdResult<u32> {
+    tauri_plugin_opener::open_path(p, None::<&str>).map_err(err).map(|_| 0)
 }
 
 /// Splits a registry command line (`"C:\x\unins000.exe" /SILENT`, `MsiExec.exe /X{...}`)
@@ -776,7 +832,7 @@ pub async fn launch_path(app: AppHandle, path: String) -> CmdResult<()> {
 /// ShellExecute handles UAC prompts for installers and runs the app from its own folder,
 /// which many games need to find their data files.
 #[cfg(windows)]
-fn shell_open(p: &Path) -> CmdResult<()> {
+pub(crate) fn shell_open(p: &Path) -> CmdResult<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -794,7 +850,7 @@ fn shell_open(p: &Path) -> CmdResult<()> {
 }
 
 #[cfg(not(windows))]
-fn shell_open(p: &Path) -> CmdResult<()> {
+pub(crate) fn shell_open(p: &Path) -> CmdResult<()> {
     tauri_plugin_opener::open_path(p, None::<&str>).map_err(err)
 }
 

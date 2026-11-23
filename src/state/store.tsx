@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { inTauri } from "../lib/native";
+import { rememberApps } from "../lib/launchCache";
+import { inTauri, native } from "../lib/native";
 import type { AppInput, InstallRecord, ProgressFn, StoreApp } from "../lib/types";
 import { BrowserInstallService, LocalInstallService } from "../providers/InstallService";
 import { PocketBaseProvider } from "../providers/PocketBaseProvider";
@@ -85,6 +86,18 @@ export function StoreProviderRoot({ children }: { children: ReactNode }) {
       .catch((e) => setError(message(e)))
       .finally(() => setReady(true));
   }, [refresh, detect]);
+
+  // Desktop shortcuts of apps the store updates go through the store. Skipped when the catalog
+  // failed to load, so that a server outage never undoes them.
+  const shortcutEntries = JSON.stringify(
+    apps.filter((a) => !a.selfUpdate && installs[a.id]?.launchPath).map((a) => ({ id: a.id, path: installs[a.id].launchPath })),
+  );
+  useEffect(() => {
+    if (!inTauri || !ready || error) return;
+    rememberApps(apps);
+    native.syncShortcuts(JSON.parse(shortcutEntries), true).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, error, shortcutEntries]);
 
   const saveApp = useCallback(
     async (input: AppInput, existing: StoreApp | null, onProgress?: ProgressFn) => {

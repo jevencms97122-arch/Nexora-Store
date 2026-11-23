@@ -60,8 +60,12 @@ export const native = {
   downloadPackage: (appId: string, url: string, fileName: string, onProgress: ProgressFn) =>
     invoke<StoredFile>("download_package", { appId, url, fileName, onProgress: channel(onProgress) }),
   removeFiles: (paths: string[]) => invoke<void>("remove_files", { paths }),
-  installPackage: (appId: string, packagePath: string, appName: string, onProgress: ProgressFn) =>
-    invoke<InstallResult>("install_package", { appId, packagePath, appName, onProgress: channel(onProgress) }),
+  /** `updateOf` (current launch path) makes it an unattended update. */
+  installPackage: (appId: string, packagePath: string, appName: string, onProgress: ProgressFn, updateOf?: string) =>
+    invoke<InstallResult>("install_package", { appId, packagePath, appName, updateOf, onProgress: channel(onProgress) }),
+  syncShortcuts: (entries: { id: string; path: string }[], prune: boolean) =>
+    invoke<void>("sync_shortcuts", { entries, prune }),
+  appInUse: (path: string) => invoke<boolean>("app_in_use", { path }),
   detectInstalled: (names: string[]) => invoke<string[]>("detect_installed", { names }),
   launch: (path: string) => invoke<void>("launch_path", { path }),
   reveal: (path = "") => invoke<void>("reveal", { path }),

@@ -169,6 +169,16 @@ export class PocketBaseProvider implements StoreProvider {
     }
   }
 
+  /** One app, or null if it left the catalog. Throws when the server doesn't answer in time. */
+  async getApp(id: string, timeoutMs: number): Promise<StoreApp | null> {
+    const res = await fetch(`${POCKETBASE_URL}/api/collections/${COLLECTION}/records/${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Erreur du serveur (${res.status})`);
+    return this.toApp((await res.json()) as PbRecord);
+  }
+
   async saveApp(input: AppInput, existing: StoreApp | null, onProgress: ProgressFn = () => {}) {
     if (!this.token) throw new Error("Connecte-toi en administrateur dans les paramètres");
     if (!inTauri) throw new Error("L'ajout de fichiers n'est possible que dans l'application Nexora Store");

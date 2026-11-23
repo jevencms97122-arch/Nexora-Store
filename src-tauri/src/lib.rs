@@ -1,4 +1,5 @@
 mod commands;
+mod launcher;
 mod pocketbase;
 
 use tauri::Manager;
@@ -39,6 +40,13 @@ const SCHEMA_V3: &str = "DROP TABLE IF EXISTS apps;";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--restore-shortcuts") {
+        launcher::restore_all();
+        return;
+    }
+    let launch_request = launcher::parse(&args);
+
     let migrations = vec![
         Migration {
             version: 1,
@@ -61,6 +69,10 @@ pub fn run() {
     ];
 
     tauri::Builder::default()
+        // Must stay first: a second start hands over before anything else is initialised.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            launcher::on_second_instance(app, &argv);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -70,10 +82,15 @@ pub fn run() {
                 .add_migrations("sqlite:nexora.db", migrations)
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             // Images picked in a form that was never saved end up here: start clean.
             if let Ok(dir) = app.path().app_data_dir() {
                 let _ = std::fs::remove_dir_all(dir.join("staging"));
+            }
+            // Started from a desktop shortcut: only the small update window opens.
+            match &launch_request {
+                Some(request) => launcher::open_window(app.handle(), request)?,
+                None => launcher::show_main(app.handle())?,
             }
             Ok(())
         })
@@ -90,6 +107,8 @@ pub fn run() {
             commands::uninstall,
             commands::system_uninstall,
             commands::delete_app_files,
+            launcher::sync_shortcuts,
+            launcher::app_in_use,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,15 +29,16 @@ export class LocalInstallService implements InstallService {
     );
   }
 
-  async install(app: StoreApp, onProgress: ProgressFn) {
+  async install(app: StoreApp, onProgress: ProgressFn, unattended = false) {
     if (!app.packagePath) throw new Error("Cette application n'a pas de fichier sur le serveur");
+    const current = unattended ? (await this.list()).find((r) => r.appId === app.id)?.launchPath : undefined;
     // Download takes the first half of the bar, installing the second half.
     const half = (offset: number): ProgressFn => ({ done, total }) =>
       onProgress(total ? { done: offset + (done / total) * 50, total: 100 } : { done: 0, total: 0 });
     const file = await native.downloadPackage(app.id, app.packagePath, app.packageName, half(0));
     let res;
     try {
-      res = await native.installPackage(app.id, file.path, app.name, half(50));
+      res = await native.installPackage(app.id, file.path, app.name, half(50), current);
     } finally {
       await native.removeFiles([file.path]).catch(() => {});
     }
